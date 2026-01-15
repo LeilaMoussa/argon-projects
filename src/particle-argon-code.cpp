@@ -11,6 +11,7 @@
 
 #define NUM_LEDS 1
 #define BUZZER_PIN D2
+#define BUTTON_PIN A2
 
 ChainableLED leds(D4, D5, NUM_LEDS);
 
@@ -25,6 +26,15 @@ int tempo = 300;
 int alarm_hour = 7;
 int alarm_minute = 0;
 float offset = -8;
+
+void playTone(int tone, int duration);
+void playNote(char note, int duration);
+void playMelody();
+void checkTime();
+int setRequestedColor(String cmd);
+int setTzOffset(String cmd);
+int setAlarmTime(String cmd);
+void cycleThroughColors();
 
 /* play tone */
 void playTone(int tone, int duration) {
@@ -61,16 +71,15 @@ void playMelody() {
 
 void checkTime() {
   if (Time.hour() == alarm_hour && Time.minute() == alarm_minute) {
-    playMelody();
+    while (digitalRead(BUTTON_PIN) == LOW) {
+      cycleThroughColors();
+      playMelody();
+    }
+    setRequestedColor("off");
   }
 }
 
 Timer timer(60000, checkTime);
-
-int changeAlarmSettings(String cmd) {
-  // format hour,minute,offset
-  return 0;
-}
 
 int setRequestedColor(String cmd) {
   if (cmd == "red") {
@@ -90,27 +99,37 @@ int setRequestedColor(String cmd) {
   return 0;
 }
 
+int setTzOffset(String cmd) {
+  offset = cmd.toInt();
+  Time.zone(offset);
+  return 0;
+}
+
+int setAlarmTime(String cmd) {
+  // format hh:mm
+  int hour = cmd.substring(0, 2).toInt();
+  int minute = cmd.substring(3, 5).toInt();
+  alarm_hour = hour;
+  alarm_minute = minute;
+  return 0;
+}
+
 void setup() {
   leds.init();
   pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT);
 
-  // on startup, diff between next alarm time and now, in millis
-  // set alarm timer with that difference
-  // initial=true
-  // alarm fn plays melody
-  // if initial is true, change time period to 24 hours
-  // sets initial=false if it's true
-
-  // need to call cloud to find out offset
-  // actually, receive offset as optional input, do that later
-  Time.zone(-8);
+  Time.zone(offset);
   timer.start();
   Particle.function("setColor", setRequestedColor);
+  Particle.function("setTzOffset", setTzOffset);
+  Particle.function("setAlarmTime", setAlarmTime);
   Serial.begin();
 }
 
 float hue = 0.0;
 boolean up = true;
+
 void cycleThroughColors() {
   for (byte i=0; i<NUM_LEDS; i++)
     leds.setColorHSB(i, hue, 1.0, 0.5);
@@ -160,4 +179,5 @@ void loop() {
       readBufOffset = 0;
     }
   }
+
 }
