@@ -3,6 +3,7 @@
 
 ### compile
 `particle compile argon --saveTo src/firmware.bin`
+`particle compile argon src/exit_listening_mode.cpp --saveTo src/exit_lm.bin`
 
 ### serial flash
 `particle flash e00fce6840686fbfe628c8ca src/firmware.bin`
@@ -16,3 +17,6 @@
 
 ### serial log monitor
 `particle serial monitor`
+
+### install lib
+`particle library add <library name>` then `particle library copy <library name>`

@@ -4,18 +4,20 @@
  */
 
 #include "Particle.h"
-
 #include <Grove_ChainableLED.h>
+#include <Debounce.h>
 
 //SYSTEM_THREAD(ENABLED);
+SYSTEM_MODE(SEMI_AUTOMATIC);
 
 #define NUM_LEDS 1
 #define BUZZER_PIN D2
 #define BUTTON_PIN A2
+#define FSM_TICK 500
 
 ChainableLED leds(D4, D5, NUM_LEDS);
 
-SerialLogHandler logHandler(LOG_LEVEL_INFO); // /dev/ttyACM0
+SerialLogHandler logHandler(LOG_LEVEL_INFO); // /dev/ttyACM0 or /dev/tty.usbmodem1101
 
 // twinkle-twinkle
 int length = 15;         /* the number of notes */
@@ -24,8 +26,11 @@ int beats[] = { 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 4 };
 int tempo = 300;
 
 int alarm_hour = 7;
-int alarm_minute = 0;
+int alarm_minute = 5;
 float offset = -8;
+
+static volatile int tickFlag = 0;
+static volatile int buttonPushes = 0;
 
 void playTone(int tone, int duration);
 void playNote(char note, int duration);
@@ -35,6 +40,24 @@ int setRequestedColor(String cmd);
 int setTzOffset(String cmd);
 int setAlarmTime(String cmd);
 void cycleThroughColors();
+void setTickFlag();
+void clearSelection();
+
+Timer alarmTimer(60000, checkTime);
+Timer fsmTimer(FSM_TICK, setTickFlag);
+Timer timeoutTimer(10000, clearSelection);
+Debounce debouncer = Debounce();
+
+void setTickFlag() {
+    tickFlag = 1;
+}
+
+void clearSelection() {
+  Log.info("button pushes %d", buttonPushes);
+  alarm_hour = buttonPushes;
+  buttonPushes = 0;
+  Log.info("alarm hour is %d", alarm_hour);
+}
 
 /* play tone */
 void playTone(int tone, int duration) {
@@ -44,6 +67,11 @@ void playTone(int tone, int duration) {
     digitalWrite(BUZZER_PIN, LOW);
     delayMicroseconds(tone);
   }
+}
+
+void stopAlarm() {
+  digitalWrite(BUZZER_PIN, LOW);
+  setRequestedColor("off");
 }
 
 void playNote(char note, int duration) {
@@ -71,15 +99,10 @@ void playMelody() {
 
 void checkTime() {
   if (Time.hour() == alarm_hour && Time.minute() == alarm_minute) {
-    while (digitalRead(BUTTON_PIN) == LOW) {
-      cycleThroughColors();
-      playMelody();
-    }
-    setRequestedColor("off");
+    cycleThroughColors();
+    playMelody();
   }
 }
-
-Timer timer(60000, checkTime);
 
 int setRequestedColor(String cmd) {
   if (cmd == "red") {
@@ -111,6 +134,7 @@ int setAlarmTime(String cmd) {
   int minute = cmd.substring(3, 5).toInt();
   alarm_hour = hour;
   alarm_minute = minute;
+  // need to publish this time to cloud, and fetch it on start
   return 0;
 }
 
@@ -120,7 +144,14 @@ void setup() {
   pinMode(BUTTON_PIN, INPUT);
 
   Time.zone(offset);
-  timer.start();
+  alarmTimer.start();
+  // BUG: This ISR causes the argon to crash, for some reason.
+  // attachInterrupt(BUTTON_PIN, stopAlarm, RISING);
+  fsmTimer.start();
+
+  debouncer.attach(BUTTON1_PIN, INPUT_PULLDOWN);
+  debouncer.interval(20);
+
   Particle.function("setColor", setRequestedColor);
   Particle.function("setTzOffset", setTzOffset);
   Particle.function("setAlarmTime", setAlarmTime);
@@ -145,16 +176,8 @@ void cycleThroughColors() {
     up = true;
 }
 
-//void loop() {
-  //cycleThroughColors();
-  //setRequestedColor("red");
-//}
-
 // Constants
 const size_t READ_BUF_SIZE = 64;
-
-// Forward declarations
-// void processBuffer();
 
 // Global variables
 char readBuf[READ_BUF_SIZE];
@@ -177,6 +200,20 @@ void loop() {
     }
     else {
       readBufOffset = 0;
+    }
+  }
+
+  debouncer.update();
+  if (tickFlag) {
+    if (debouncer.rose()) {
+      //tone(BUZZER_PIN, 100, 100);  
+      buttonPushes++;
+      Log.info("push %d", buttonPushes);
+      tickFlag = 0;
+      if (timeoutTimer.isActive()) {
+        timeoutTimer.stop();
+      }
+      timeoutTimer.start();
     }
   }
 

@@ -52,3 +52,6 @@ Thumbs.db
 *.su
 *.idb
 *.pdb
+
+/lib
+**/*.bin
